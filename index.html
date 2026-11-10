@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Carnet de séances</title>
+<meta name="theme-color" content="#2f6f4f">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Carnet">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="top-in">
+    <div class="brand"><h1>Carnet</h1><span class="sub" id="status"></span></div>
+    <nav class="tabs" id="tabs">
+      <button data-tab="seance" aria-pressed="true">Séance</button>
+      <button data-tab="hist" aria-pressed="false">Historique</button>
+      <button data-tab="prog" aria-pressed="false">Progrès</button>
+      <button data-tab="exos" aria-pressed="false">Exos</button>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+  <section id="v-seance" class="stack"></section>
+  <section id="v-hist" class="stack" hidden></section>
+  <section id="v-prog" class="stack" hidden></section>
+  <section id="v-exos" class="stack" hidden></section>
+</main>
+
+<!-- Chrono : bandeau repliable -->
+<div class="timer" id="timer">
+  <div class="timer-in">
+    <div class="timer-main">
+      <div class="clock" id="clock">0:00</div>
+      <div class="timer-label" id="timer-label">Récup</div>
+    </div>
+    <div class="chips" id="chips"></div>
+    <div class="timer-actions">
+      <button class="btn pri" id="timer-finish" hidden>Terminer</button>
+      <button class="btn" id="timer-stop">Stop</button>
+      <button class="btn icon" id="timer-hide" aria-label="Réduire le chrono">−</button>
+    </div>
+  </div>
+</div>
+<button class="pill-timer" id="timer-pill" hidden aria-label="Afficher le chrono">⏱ <span id="pill-clock">0:00</span></button>
+
+<div class="modal" id="modal" hidden><div class="modal-box" id="modal-box"></div></div>
+<div class="toast" id="toast" hidden></div>
+
+<script src="app.js"></script>
+</body>
+</html>
