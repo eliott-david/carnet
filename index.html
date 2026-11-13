@@ -3,55 +3,61 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Carnet de séances</title>
-<meta name="theme-color" content="#2f6f4f">
+<title>Coach Claude</title>
+<meta name="theme-color" content="#f5f5f7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Carnet">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Coach Claude">
 <link rel="apple-touch-icon" href="icon-180.png">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<header class="top">
-  <div class="top-in">
-    <div class="brand"><h1>Carnet</h1><span class="sub" id="status"></span></div>
-    <nav class="tabs" id="tabs">
-      <button data-tab="seance" aria-pressed="true">Séance</button>
-      <button data-tab="hist" aria-pressed="false">Historique</button>
-      <button data-tab="prog" aria-pressed="false">Progrès</button>
-      <button data-tab="exos" aria-pressed="false">Exos</button>
-    </nav>
+<header class="navbar" id="navbar">
+  <div class="nav-in">
+    <span class="nav-title" id="nav-title">Séance</span>
+    <button class="nav-btn" data-act="timer-open" aria-label="Ouvrir le minuteur">
+      <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="13.5" r="7.5"/><path d="M12 13.5V10M9.5 3h5M18.5 6.5l1.2-1.2"/></svg>
+    </button>
   </div>
 </header>
 
-<main class="wrap">
-  <section id="v-seance" class="stack"></section>
-  <section id="v-hist" class="stack" hidden></section>
-  <section id="v-prog" class="stack" hidden></section>
-  <section id="v-exos" class="stack" hidden></section>
+<main>
+  <section id="v-seance" class="view"></section>
+  <section id="v-hist" class="view" hidden></section>
+  <section id="v-prog" class="view" hidden></section>
+  <section id="v-exos" class="view" hidden></section>
 </main>
 
-<!-- Chrono : bandeau repliable -->
-<div class="timer" id="timer">
-  <div class="timer-in">
-    <div class="timer-main">
-      <div class="clock" id="clock">0:00</div>
-      <div class="timer-label" id="timer-label">Récup</div>
-    </div>
-    <div class="chips" id="chips"></div>
-    <div class="timer-actions">
-      <button class="btn pri" id="timer-finish" hidden>Terminer</button>
-      <button class="btn" id="timer-stop">Stop</button>
-      <button class="btn icon" id="timer-hide" aria-label="Réduire le chrono">−</button>
-    </div>
+<!-- Minuteur réduit, au-dessus des onglets -->
+<div class="mini" id="mini" hidden>
+  <div class="mini-in">
+    <button class="mini-open" data-act="timer-open" aria-label="Afficher le minuteur">
+      <svg class="mini-ring" viewBox="0 0 36 36" aria-hidden="true"><circle class="ring-track" cx="18" cy="18" r="14"/><circle class="ring-prog" id="mini-ring" cx="18" cy="18" r="14" stroke-dasharray="87.96" stroke-dashoffset="0"/></svg>
+      <span class="mini-txt"><span class="mini-time" id="mini-time">0:00</span><span class="mini-label" id="mini-label">Récup</span></span>
+    </button>
+    <button class="mini-btn" id="mini-btn" data-act="mini-btn" aria-label="Arrêter le minuteur"></button>
   </div>
 </div>
-<button class="pill-timer" id="timer-pill" hidden aria-label="Afficher le chrono">⏱ <span id="pill-clock">0:00</span></button>
 
-<div class="modal" id="modal" hidden><div class="modal-box" id="modal-box"></div></div>
-<div class="toast" id="toast" hidden></div>
+<nav class="tabbar" aria-label="Sections">
+  <div class="tabbar-in">
+    <button class="tab" data-act="tab" data-tab="seance" aria-current="page">
+      <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7v10M17 7v10M4 9.5v5M20 9.5v5M7 12h10"/></svg>Séance</button>
+    <button class="tab" data-act="tab" data-tab="hist">
+      <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>Historique</button>
+    <button class="tab" data-act="tab" data-tab="prog">
+      <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19.5h16"/><path d="M5 15l4.5-5 4 3L20 6"/></svg>Progrès</button>
+    <button class="tab" data-act="tab" data-tab="exos">
+      <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 6.5H20M9.5 12H20M9.5 17.5H20"/><path d="M4.5 6.5h.01M4.5 12h.01M4.5 17.5h.01" stroke-width="3"/></svg>Exercices</button>
+  </div>
+</nav>
+
+<div class="sheet-wrap" id="modal" hidden><div class="sheet" id="modal-box" role="dialog" aria-modal="true"></div></div>
+<div class="dialog-wrap" id="dialog" hidden></div>
+<div class="toast" id="toast" role="status" hidden></div>
 
 <script src="app.js"></script>
 </body>
