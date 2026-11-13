@@ -30,7 +30,7 @@ const S = { exercises: [], sessions: [], models: [], draft: null, settings: { sh
 const save = k => DB.set(k, S[k]).catch(e => toast("Sauvegarde impossible : " + e.message));
 const photos = {}; // id -> dataURL
 const SHORTCUT = "Minuteur Coach";
-const APP_VERSION = "4";
+const APP_VERSION = "2.0.4";
 let pendingReload = false; // nouvelle version prête, rechargement à la fermeture de la fenêtre ouverte
 
 /* ---------- Icônes ---------- */
@@ -45,6 +45,7 @@ const I = {
   chev: ic('<path d="M9.5 5.5L16 12l-6.5 6.5"/>', "chev"),
   play: ic('<path d="M8 5.8v12.4a.8.8 0 0 0 1.2.7l10-6.2a.8.8 0 0 0 0-1.4l-10-6.2A.8.8 0 0 0 8 5.8z"/>', "fill"),
   search: ic('<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/>'),
+  chevDown: ic('<path d="M6 9.5l6 6 6-6"/>', "chev-down"),
   sparkle: ic('<path d="M12 3l2 5.6 5.6 2-5.6 2L12 18.2l-2-5.6-5.6-2 5.6-2z"/>', "fill"),
   dumbbell: ic('<path d="M7 7v10M17 7v10M4 9.5v5M20 9.5v5M7 12h10"/>'),
 };
@@ -79,7 +80,7 @@ function thumb(lib, mode, zoom) {
 const val = (set, ex) => num(ex.mode === "time" ? set.sec : set.reps);
 const fmtSet = (set, ex) => {
   const v = ex.mode === "time" ? (set.sec ? set.sec + " s" : "?") : (set.reps || "?");
-  return v + (ex.kg && num(set.kg) ? " × " + set.kg + " kg" : "") + (ex.band && set.band ? " (" + set.band.toLowerCase() + ")" : "");
+  return v + (ex.kg && num(set.kg) ? " × " + set.kg + " kg" : "") + (ex.band && set.band && set.band !== "Aucun" ? " (" + set.band.toLowerCase() + ")" : "");
 };
 /* Score comparable : moins d'élastique > plus de charge > plus de reps/secondes */
 const score = (set, ex) => [-(ex.band ? Math.max(0, BANDS.indexOf(set.band || "Aucun")) : 0), ex.kg ? num(set.kg) : 0, val(set, ex)];
@@ -257,8 +258,15 @@ function renderHist() {
   const filters = used.length ? `<div class="filters" role="group" aria-label="Filtrer par type">
     <button class="chip ${HIST_FILTER ? "" : "on"}" data-act="hist-filter" data-v="">Toutes</button>
     ${used.map(t => `<button class="chip ${HIST_FILTER === t ? "on" : ""}" data-act="hist-filter" data-v="${esc(t)}">${esc(t)}</button>`).join("")}</div>` : "";
-  $("v-hist").innerHTML = largeTitle("hist") + filters + (list.length ? list.map(s => `<article class="card">
-    <div class="sess-head"><div><p class="eyebrow">${fmtLong(s.date)}</p><h3>${esc(s.name)}</h3>${s.type ? `<div class="tag-line">${tag(s.type)}</div>` : ""}</div>
+  const shut = new Set(S.settings.collapsed || []);
+  const allShut = list.length > 0 && list.every(s => shut.has(s.id));
+  const side = list.length ? `<button class="btn-text" data-act="sess-all">${allShut ? "Tout afficher" : "Tout réduire"}</button>` : "";
+  $("v-hist").innerHTML = largeTitle("hist", side) + filters + (list.length ? list.map(s => shut.has(s.id) ? `<article class="card sess-card collapsed">
+    <div class="sess-head"><button class="sess-toggle" data-act="sess-toggle" data-id="${s.id}" aria-expanded="false" aria-label="Afficher le détail de ${esc(s.name)}">
+      <span class="sess-titles"><span class="eyebrow">${fmtLong(s.date)}</span><span class="sess-name">${esc(s.name)}</span></span>${I.chevDown}</button></div>
+  </article>` : `<article class="card sess-card">
+    <div class="sess-head"><button class="sess-toggle" data-act="sess-toggle" data-id="${s.id}" aria-expanded="true" aria-label="Réduire ${esc(s.name)}">
+      <span class="sess-titles"><span class="eyebrow">${fmtLong(s.date)}</span><span class="sess-name">${esc(s.name)}</span>${s.type ? `<span class="tag-line">${tag(s.type)}</span>` : ""}</span>${I.chevDown}</button>
       <button class="icon-btn lg" data-act="edit" data-id="${s.id}" aria-label="Modifier la séance">${I.pencil}</button></div>
     ${s.note ? `<p class="hint">${esc(s.note)}</p>` : ""}
     <div class="sess-list">${s.exos.map(e => `<div class="sess-ex">
@@ -693,6 +701,17 @@ document.addEventListener("click", async e => {
       openTypeSheet(); toast(`Type « ${t} » retiré`); break;
     }
     case "hist-filter": HIST_FILTER = b.dataset.v; renderHist(); break;
+    case "sess-toggle": {
+      const c = new Set(S.settings.collapsed || []);
+      c.has(id) ? c.delete(id) : c.add(id);
+      S.settings.collapsed = [...c].filter(x => S.sessions.some(s => s.id === x)); save("settings"); renderHist(); break;
+    }
+    case "sess-all": {
+      const ids = (HIST_FILTER ? S.sessions.filter(s => s.type === HIST_FILTER) : S.sessions).map(s => s.id);
+      const c = new Set(S.settings.collapsed || []), allShut = ids.every(x => c.has(x));
+      ids.forEach(x => allShut ? c.delete(x) : c.add(x));
+      S.settings.collapsed = [...c].filter(x => S.sessions.some(s => s.id === x)); save("settings"); renderHist(); break;
+    }
     case "chart-mode": CH_MODE[b.dataset.key] = b.dataset.m; renderProg(); break;
     case "export": exportData(); break;
     case "shortcut-help": openShortcutHelp(); break;
@@ -724,22 +743,6 @@ function showTab(t) {
 }
 function onScroll() { $("navbar").classList.toggle("scrolled", window.scrollY > 40); }
 window.addEventListener("scroll", onScroll, { passive: true });
-
-/* Bug iOS (appli ajoutée à l'écran d'accueil) : la zone utilisée pour placer les éléments fixes
-   est parfois plus courte que l'écran, ce qui laisse un espace vide sous la barre d'onglets.
-   On mesure l'écart et on redescend les éléments fixes d'autant. */
-const STANDALONE = window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
-function fixViewport() {
-  if (!STANDALONE) return;
-  const vv = window.visualViewport, ch = document.documentElement.clientHeight;
-  const real = Math.max(window.innerHeight, vv ? vv.height + vv.offsetTop : 0);
-  const gap = Math.round(real - ch);
-  document.documentElement.style.setProperty("--gap", (gap > 0 && gap < 140 ? gap : 0) + "px");
-}
-window.addEventListener("resize", fixViewport);
-window.visualViewport?.addEventListener("resize", fixViewport);
-window.addEventListener("orientationchange", () => setTimeout(fixViewport, 300));
-window.addEventListener("pageshow", fixViewport);
 
 /* Fenêtres ouvertes : la page de derrière ne doit pas défiler */
 let touchY = 0;
@@ -825,7 +828,7 @@ function drawTimer() {
     main.textContent = T.mode === "rest" ? "Arrêter" : T.mode === "hold" ? "Terminer" : "Démarrer";
     main.className = "round " + (T.mode === "rest" ? "stop" : "go");
     $("t-minus").disabled = $("t-plus").disabled = T.mode !== "rest";
-    document.querySelectorAll(".chip").forEach(c => c.classList.toggle("on", +c.dataset.s === T.pick));
+    document.querySelectorAll(".presets .chip").forEach(c => c.classList.toggle("on", +c.dataset.s === T.pick));
   }
 }
 function openTimerSheet() {
@@ -893,7 +896,6 @@ async function importData(file) {
   } catch (e) { toast("Stockage indisponible : les données ne seront pas gardées."); }
   if (!S.draft) S.draft = newDraft();
   sortSessions(); renderAll(); showTab("seance"); drawTimer();
-  fixViewport(); setTimeout(fixViewport, 400);
 })();
 
 /* Mises à jour : dès qu'une nouvelle version est installée, l'appli se recharge toute seule
