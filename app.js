@@ -30,7 +30,7 @@ const S = { exercises: [], sessions: [], models: [], draft: null, settings: { sh
 const save = k => DB.set(k, S[k]).catch(e => toast("Sauvegarde impossible : " + e.message));
 const photos = {}; // id -> dataURL
 const SHORTCUT = "Minuteur Coach";
-const APP_VERSION = "5";
+const APP_VERSION = "2.0.4";
 let pendingReload = false; // nouvelle version prête, rechargement à la fermeture de la fenêtre ouverte
 
 /* ---------- Icônes ---------- */

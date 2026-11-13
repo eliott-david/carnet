@@ -2,7 +2,7 @@
 // Réseau d'abord (pour avoir toujours la dernière version), cache en secours si pas de réseau
 // ou si le réseau met plus de 2,5 s à répondre.
 // Changer VERSION à chaque mise à jour de l'appli.
-const VERSION = "coach-claude-v5";
+const VERSION = "coach-claude-2.0.4";
 const FILES = ["./", "index.html", "app.js", "style.css", "manifest.webmanifest", "icon-180.png", "icon-192.png", "icon-512.png"];
 
 self.addEventListener("install", e => {
