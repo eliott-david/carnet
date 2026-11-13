@@ -57,7 +57,12 @@ const fmtLong = d => new Date(d + "T12:00").toLocaleDateString("fr-FR", { weekda
 const fmtTime = s => Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
 const plural = (n, w) => `${n} ${w}${n > 1 ? "s" : ""}`;
 const BANDS = ["Aucun", "Léger", "Moyen", "Fort", "Très fort"];
-const num = v => (v === "" || v == null) ? 0 : +String(v).replace(",", ".") || 0;
+/* Types de séance proposés (les types créés par l'utilisateur s'ajoutent avant « Autre ») */
+const TYPES = [["Push", "#ff9500"], ["Pull", "#0a84ff"], ["Jambes", "#34c759"], ["Haut du corps", "#5e5ce6"], ["Full-body", "#ff2d55"], ["Skills", "#af52de"], ["Gainage / abdos", "#30b0c7"], ["Mobilité / étirements", "#00c7be"]];
+const typeColor = t => (TYPES.find(x => x[0] === t) || [null, "#8e8e93"])[1];
+const allTypes = () => [...TYPES.map(t => t[0]), ...(S.settings.types || []), "Autre"];
+const tag = t => t ? `<span class="tag" style="--c:${typeColor(t)}">${esc(t)}</span>` : "";
+const num =v => (v === "" || v == null) ? 0 : +String(v).replace(",", ".") || 0;
 let toastT;
 function toast(msg) { const t = $("toast"); t.textContent = msg; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => t.hidden = true, 2400); }
 const exById = id => S.exercises.find(e => e.id === id);
@@ -109,10 +114,13 @@ function buildComments(s) {
     else out.push({ t: `${ex.name} : même niveau que la dernière fois, c'est stable.` });
   }
   const d = new Date(s.date + "T12:00");
-  const week = S.sessions.filter(o => o.id !== s.id && (d - new Date(o.date + "T12:00")) / 864e5 >= 0 && (d - new Date(o.date + "T12:00")) / 864e5 < 7).length + 1;
+  const inWeek = o => { const k = (d - new Date(o.date + "T12:00")) / 864e5; return o.id !== s.id && k >= 0 && k < 7; };
+  const week = S.sessions.filter(inWeek).length + 1;
+  const weekType = s.type ? S.sessions.filter(o => inWeek(o) && o.type === s.type).length + 1 : 0;
   if (prior[0]) {
     const gap = Math.round((d - new Date(prior[0].date + "T12:00")) / 864e5);
     if (gap >= 8) out.push({ t: `Reprise après ${gap} jours sans séance enregistrée. Bien joué d'être revenu.` });
+    else if (weekType >= 2) out.push({ t: `${weekType}e séance ${s.type} sur les 7 derniers jours.` });
     else if (week >= 2) out.push({ t: `${week}e séance sur les 7 derniers jours.` });
   }
   const rpes = s.exos.flatMap(e => e.sets.map(x => num(x.rpe))).filter(Boolean);
@@ -126,7 +134,7 @@ function buildComments(s) {
 }
 
 /* ---------- Brouillon de séance ---------- */
-const newDraft = () => ({ id: null, name: "", date: today(), note: "", exos: [] });
+const newDraft = () => ({ id: null, name: "", type: "", date: today(), note: "", exos: [] });
 const blankSet = (rest, ph = {}) => ({ reps: "", sec: "", kg: "", band: "", rest, rpe: "", note: "", done: false, ph });
 function draftExo(ex, template) {
   const last = lastOccurrence(ex.id, S.sessions);
@@ -180,13 +188,16 @@ function renderSeance() {
   const d = S.draft, v = $("v-seance");
   const orig = d.id && S.sessions.find(s => s.id === d.id);
   const editing = d.id ? `<div class="banner"><div><b>Modification en cours</b><span>Séance du ${fmtDate(orig?.date || d.date)}</span></div><button class="btn-text" data-act="cancel-edit">Annuler</button></div>` : "";
-  const models = !d.exos.length && S.models.length ? `<h2 class="sh">Démarrer depuis un modèle</h2>
-    <div class="group">${S.models.map(m => `<button class="row row-btn" data-act="use-model" data-id="${m.id}">
-      <span class="row-main"><span class="row-title">${esc(m.name)}</span><span class="row-sub">${esc(m.exos.map(e => e.name).join(", "))}</span></span>${I.chev}</button>`).join("")}</div>` : "";
+  // Modèles : ceux du type choisi d'abord
+  const ms = [...S.models].sort((a, b) => (b.type === d.type && !!d.type) - (a.type === d.type && !!d.type));
+  const models = !d.exos.length && ms.length ? `<h2 class="sh">Démarrer depuis un modèle</h2>
+    <div class="group">${ms.map(m => `<button class="row row-btn" data-act="use-model" data-id="${m.id}">
+      <span class="row-main"><span class="row-title">${esc(m.name)}</span><span class="row-sub">${esc(m.exos.map(e => e.name).join(", "))}</span></span>${tag(m.type)}${I.chev}</button>`).join("")}</div>` : "";
   v.innerHTML = `${largeTitle("seance")}
     ${editing}
     <div class="group">
-      <label class="row"><span class="row-label">Nom</span><input class="row-input" id="d-name" placeholder="Push, Tirage…" value="${esc(d.name)}" autocomplete="off"></label>
+      <label class="row"><span class="row-label">Nom</span><input class="row-input" id="d-name" placeholder="Séance du soir…" value="${esc(d.name)}" autocomplete="off"></label>
+      <button class="row row-btn" data-act="type-open"><span class="row-label">Type</span><span class="row-value">${d.type ? tag(d.type) : "Choisir"}</span>${I.chev}</button>
       <label class="row"><span class="row-label">Date</span><input class="row-input" id="d-date" type="date" value="${esc(d.date)}"></label>
       <div class="row"><textarea class="row-area" id="d-note" rows="2" placeholder="Commentaire sur la séance (forme, sommeil…)">${esc(d.note)}</textarea></div>
     </div>
@@ -235,9 +246,17 @@ function renderExo(x, i) {
 }
 
 /* ---------- Rendu : Historique ---------- */
+let HIST_FILTER = "";
 function renderHist() {
-  $("v-hist").innerHTML = largeTitle("hist") + (S.sessions.length ? S.sessions.map(s => `<article class="card">
-    <div class="sess-head"><div><p class="eyebrow">${fmtLong(s.date)}</p><h3>${esc(s.name)}</h3></div>
+  const used = [...new Set(S.sessions.map(s => s.type).filter(Boolean))];
+  const order = allTypes(); used.sort((a, b) => (order.indexOf(a) + 1 || 99) - (order.indexOf(b) + 1 || 99));
+  if (HIST_FILTER && !used.includes(HIST_FILTER)) HIST_FILTER = "";
+  const list = HIST_FILTER ? S.sessions.filter(s => s.type === HIST_FILTER) : S.sessions;
+  const filters = used.length ? `<div class="filters" role="group" aria-label="Filtrer par type">
+    <button class="chip ${HIST_FILTER ? "" : "on"}" data-act="hist-filter" data-v="">Toutes</button>
+    ${used.map(t => `<button class="chip ${HIST_FILTER === t ? "on" : ""}" data-act="hist-filter" data-v="${esc(t)}">${esc(t)}</button>`).join("")}</div>` : "";
+  $("v-hist").innerHTML = largeTitle("hist") + filters + (list.length ? list.map(s => `<article class="card">
+    <div class="sess-head"><div><p class="eyebrow">${fmtLong(s.date)}</p><h3>${esc(s.name)}</h3>${s.type ? `<div class="tag-line">${tag(s.type)}</div>` : ""}</div>
       <button class="icon-btn lg" data-act="edit" data-id="${s.id}" aria-label="Modifier la séance">${I.pencil}</button></div>
     ${s.note ? `<p class="hint">${esc(s.note)}</p>` : ""}
     <div class="sess-list">${s.exos.map(e => `<div class="sess-ex">
@@ -258,32 +277,98 @@ function renderProg() {
     map.get(k).pts.push({ date: s.date, best: b, ex: e });
   }));
   if (!map.size) { $("v-prog").innerHTML = largeTitle("prog") + `<p class="empty">Tes records et l'évolution de chaque exercice s'afficheront ici après quelques séances.</p>`; return; }
-  $("v-prog").innerHTML = largeTitle("prog") + [...map.values()].map(({ ex, pts }) => {
+  $("v-prog").innerHTML = largeTitle("prog") + [...map.entries()].map(([key, { ex, pts }]) => {
     const rec = pts.reduce((a, p) => cmp(score(p.best, p.ex), score(a.best, a.ex)) > 0 ? p : a);
     const lastP = pts[pts.length - 1], isRec = rec === lastP && pts.length > 1;
-    const name = (exById(ex.exId) || ex).name, unit = ex.mode === "time" ? "secondes" : "reps";
+    const name = (exById(ex.exId) || ex).name;
+    const hasKg = pts.some(p => p.ex.kg && p.ex.sets.some(s => num(s.kg) > 0));
+    const modes = [["best", "Meilleure série"], ["vol", "Volume"]]; if (hasKg) modes.push(["kg", "Charge"]);
+    const mode = modes.some(m => m[0] === CH_MODE[key]) ? CH_MODE[key] : "best";
     return `<article class="card">
       <div class="metric-head"><h3>${esc(name)}</h3>${isRec ? `<span class="badge">Nouveau record</span>` : `<span class="muted">${plural(pts.length, "séance")}</span>`}</div>
       <div class="metric-row">
         <div><p class="label">Record</p><p class="value rec">${esc(fmtSet(rec.best, rec.ex))}</p><p class="muted">${fmtDate(rec.date)}</p></div>
         <div><p class="label">Dernière fois</p><p class="value">${esc(fmtSet(lastP.best, lastP.ex))}</p><p class="muted">${fmtDate(lastP.date)}</p></div>
       </div>
-      ${spark(pts.map(p => val(p.best, p.ex)), unit)}
-      ${pts.length > 1 ? `<p class="muted">Meilleure série en ${unit}, séance par séance${ex.band ? ". Le niveau d'élastique compte aussi dans le record." : "."}</p>` : ""}
+      ${pts.length > 1 ? `<div class="seg seg-sm" style="grid-template-columns:repeat(${modes.length},1fr)">${modes.map(([m, l]) => `<button data-act="chart-mode" data-key="${esc(key)}" data-m="${m}" aria-pressed="${m === mode}">${l}</button>`).join("")}</div>` : ""}
+      ${chart(key, pts, ex, mode, rec)}
     </article>`;
   }).join("");
 }
-function spark(v, unit) {
-  if (v.length < 2) return "";
-  const W = 300, H = 64, max = Math.max(...v), min = Math.min(...v), r = max - min || 1;
-  const pts = v.map((y, i) => [i * (W - 10) / (v.length - 1) + 5, H - 8 - (y - min) / r * (H - 18)]);
-  const line = pts.map(p => p.map(n => n.toFixed(1)).join(",")).join(" "), L = pts[pts.length - 1];
-  return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Meilleure série en ${unit}, séance par séance">
-    <defs><linearGradient id="sg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--accent)" stop-opacity=".25"/><stop offset="1" stop-color="var(--accent)" stop-opacity="0"/></linearGradient></defs>
-    <polygon points="5,${H - 2} ${line} ${L[0].toFixed(1)},${H - 2}" fill="url(#sg)"/>
-    <polyline points="${line}" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>
-    <circle cx="${L[0].toFixed(1)}" cy="${L[1].toFixed(1)}" r="4" fill="var(--accent)" stroke="var(--card)" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>`;
+
+/* ---------- Courbes ---------- */
+const CH_MODE = {};   // vue choisie par exercice
+const CH_DATA = {};   // points tracés, pour l'affichage au toucher
+function niceTicks(lo, hi) {
+  if (hi === lo) { hi = hi + Math.max(1, Math.abs(hi) * .2); lo = Math.max(0, lo - Math.max(1, Math.abs(lo) * .2)); }
+  const raw = (hi - lo) / 3, p = Math.pow(10, Math.floor(Math.log10(raw))), f = raw / p;
+  const step = (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p;
+  const start = Math.floor(lo / step) * step, end = Math.ceil(hi / step) * step, out = [];
+  for (let v = start; v <= end + step / 2; v += step) out.push(+v.toFixed(6));
+  return out;
 }
+function chart(key, pts, ex, mode, rec) {
+  if (pts.length < 2) return `<p class="muted">La courbe apparaîtra dès ta 2e séance avec cet exercice.</p>`;
+  const u = ex.mode === "time" ? "s" : "reps";
+  const series = pts.map(p => {
+    if (mode === "vol") { const t = total(p.ex); return { date: p.date, v: t, label: `${t} ${u} au total` }; }
+    if (mode === "kg") { const k = Math.max(0, ...p.ex.sets.filter(s => val(s, p.ex) > 0).map(s => num(s.kg))); return { date: p.date, v: k, label: k ? `${k} kg` : "Sans charge" }; }
+    return { date: p.date, v: val(p.best, p.ex), label: fmtSet(p.best, p.ex) };
+  });
+  const vals = series.map(s => s.v), ticks = niceTicks(Math.min(...vals), Math.max(...vals));
+  const lo = ticks[0], hi = ticks[ticks.length - 1];
+  const W = 320, H = 168, L = 6, R = 34, T = 40, B = 24, n = series.length;
+  const xs = series.map((_, i) => L + 6 + i * (W - L - R - 12) / (n - 1));
+  const ys = series.map(s => T + (hi - s.v) / (hi - lo || 1) * (H - T - B));
+  const top = mode === "best" ? pts.indexOf(rec) : vals.indexOf(Math.max(...vals));
+  const line = xs.map((x, i) => `${x.toFixed(1)},${ys[i].toFixed(1)}`).join(" ");
+  const fmtTick = v => Number.isInteger(v) ? v : v.toFixed(1).replace(".", ",");
+  const short = d => new Date(d + "T12:00").toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
+  const dateIdx = [...new Set([0, Math.round((n - 1) / 2), n - 1])];
+  CH_DATA[key] = { series, xs, ys, W };
+  const unitName = { best: ex.mode === "time" ? "secondes" : "répétitions", vol: ex.mode === "time" ? "secondes au total" : "répétitions au total", kg: "kg" }[mode];
+  const caption = {
+    best: `Meilleure série de chaque séance${ex.band ? ". Le niveau d'élastique compte aussi dans le record" : ""}.`,
+    vol: `Total des ${ex.mode === "time" ? "secondes" : "répétitions"} de chaque séance.`,
+    kg: "Charge la plus lourde utilisée à chaque séance.",
+  }[mode];
+  return `<div class="chart" data-key="${esc(key)}">
+    <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(caption)} Dernière valeur : ${esc(series[n - 1].label)}.">
+      <defs><linearGradient id="g-${esc(key).replace(/\W/g, "")}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--accent)" stop-opacity=".22"/><stop offset="1" stop-color="var(--accent)" stop-opacity="0"/></linearGradient></defs>
+      ${ticks.map(t => { const y = T + (hi - t) / (hi - lo || 1) * (H - T - B); return `<line class="grid" x1="${L}" x2="${W - R + 4}" y1="${y.toFixed(1)}" y2="${y.toFixed(1)}"/><text class="axis" x="${W - R + 8}" y="${(y + 3.5).toFixed(1)}">${fmtTick(t)}</text>`; }).join("")}
+      ${dateIdx.map(i => `<text class="axis" x="${xs[i].toFixed(1)}" y="${H - 6}" text-anchor="${i === 0 ? "start" : i === n - 1 ? "end" : "middle"}">${short(series[i].date)}</text>`).join("")}
+      <polygon points="${xs[0].toFixed(1)},${H - B} ${line} ${xs[n - 1].toFixed(1)},${H - B}" fill="url(#g-${esc(key).replace(/\W/g, "")})"/>
+      <polyline points="${line}" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
+      ${xs.map((x, i) => `<circle cx="${x.toFixed(1)}" cy="${ys[i].toFixed(1)}" r="${i === n - 1 || i === top ? 4.5 : 3}" fill="${i === top ? "var(--orange)" : "var(--accent)"}" stroke="var(--card)" stroke-width="2"/>`).join("")}
+      <line class="chart-cursor" x1="0" x2="0" y1="${T - 6}" y2="${H - B}"/>
+      <circle class="chart-sel" cx="0" cy="0" r="6"/>
+    </svg>
+    <div class="chart-tip" hidden></div>
+  </div>
+  <p class="muted chart-cap">${caption} Touche la courbe pour voir le détail.</p>`;
+}
+function chartPick(el, clientX) {
+  const d = CH_DATA[el.dataset.key]; if (!d) return;
+  const r = el.querySelector("svg").getBoundingClientRect(), vx = (clientX - r.left) / r.width * d.W;
+  let k = 0; d.xs.forEach((x, i) => { if (Math.abs(x - vx) < Math.abs(d.xs[k] - vx)) k = i; });
+  const cur = el.querySelector(".chart-cursor"), sel = el.querySelector(".chart-sel"), tip = el.querySelector(".chart-tip");
+  cur.setAttribute("x1", d.xs[k]); cur.setAttribute("x2", d.xs[k]); sel.setAttribute("cx", d.xs[k]); sel.setAttribute("cy", d.ys[k]);
+  el.classList.add("picked");
+  tip.innerHTML = `<b>${esc(d.series[k].label)}</b><span>${esc(fmtLong(d.series[k].date))}</span>`;
+  tip.hidden = false;
+  const w = el.clientWidth, half = tip.offsetWidth / 2, x = d.xs[k] / d.W * w;
+  tip.style.left = `${Math.min(w - half, Math.max(half, x)).toFixed(1)}px`;
+}
+function chartClear(el) { el.classList.remove("picked"); el.querySelector(".chart-tip").hidden = true; }
+document.addEventListener("pointerdown", e => {
+  const el = e.target.closest(".chart");
+  document.querySelectorAll(".chart.picked").forEach(c => c !== el && chartClear(c));
+  if (el) chartPick(el, e.clientX);
+});
+document.addEventListener("pointermove", e => {
+  const el = e.target.closest(".chart");
+  if (el && (e.pointerType === "mouse" || e.buttons || e.pointerType === "touch")) chartPick(el, e.clientX);
+});
 
 /* ---------- Rendu : Exercices, modèles, réglages ---------- */
 function renderExos() {
@@ -295,7 +380,7 @@ function renderExos() {
 
     <h2 class="sh">Modèles de séance</h2>
     ${S.models.length ? `<div class="group">${S.models.map(m => `<button class="row row-btn" data-act="model-menu" data-id="${m.id}">
-        <span class="row-main"><span class="row-title">${esc(m.name)}</span><span class="row-sub">${plural(m.exos.length, "exercice")} · ${esc(m.exos.map(e => e.name).join(", "))}</span></span>${I.chev}</button>`).join("")}</div>`
+        <span class="row-main"><span class="row-title">${esc(m.name)}</span><span class="row-sub">${plural(m.exos.length, "exercice")} · ${esc(m.exos.map(e => e.name).join(", "))}</span></span>${tag(m.type)}${I.chev}</button>`).join("")}</div>`
       : `<p class="footnote" style="margin-top:8px">Pendant une séance, « Enregistrer comme modèle » garde la liste d'exercices pour la relancer en un geste.</p>`}
 
     <h2 class="sh">Minuteur sur l'écran verrouillé</h2>
@@ -402,6 +487,32 @@ function addSet(i) {
   return x.sets.length - 1;
 }
 
+/* ---------- Type de séance ---------- */
+function openTypeSheet() {
+  const cur = S.draft.type, custom = S.settings.types || [];
+  openSheet(`<div class="sheet-head"><button class="btn-text" data-act="close">Annuler</button><h2>Type de séance</h2><span></span></div>
+    <div class="group">
+      <button class="row row-btn" data-act="type-pick" data-v=""><span class="row-title">Aucun</span>${cur ? "" : `<span class="accent">${I.check}</span>`}</button>
+      ${allTypes().map(t => `<button class="row row-btn" data-act="type-pick" data-v="${esc(t)}">
+        <span class="type-dot" style="--c:${typeColor(t)}"></span><span class="row-title">${esc(t)}</span>${t === cur ? `<span class="accent">${I.check}</span>` : ""}</button>`).join("")}
+    </div>
+    <h2 class="sh">Mes types</h2>
+    <div class="group">
+      ${custom.map(t => `<div class="row"><span class="type-dot" style="--c:${typeColor(t)}"></span><span class="row-title">${esc(t)}</span><button class="btn-text danger" data-act="type-del" data-v="${esc(t)}">Retirer</button></div>`).join("")}
+      <div class="row"><input class="row-input left" id="type-new" placeholder="Nouveau type (ex. Dos / biceps)" autocomplete="off" enterkeyhint="done"><button class="btn-text bold" data-act="type-add">Ajouter</button></div>
+    </div>
+    <p class="footnote">Les types que tu ajoutes apparaissent dans la liste, avant « Autre ». Les séances déjà enregistrées gardent leur type.</p>`);
+}
+function setDraftType(t) { S.draft.type = t; saveDraft(); renderSeance(); }
+async function addType() {
+  const t = $("type-new").value.trim().replace(/\s+/g, " ");
+  if (!t) { toast("Écris le nom du type."); return; }
+  if (allTypes().some(x => x.toLowerCase() === t.toLowerCase())) { toast("Ce type existe déjà."); return; }
+  S.settings.types = [...(S.settings.types || []), t]; await save("settings");
+  closeSheet(); setDraftType(t); toast(`Type « ${t} » ajouté`);
+}
+document.addEventListener("keydown", e => { if (e.key === "Enter" && e.target.id === "type-new") { e.preventDefault(); addType(); } });
+
 /* ---------- Modèles ---------- */
 function openModelForm() {
   openSheet(`<div class="sheet-head"><button class="btn-text" data-act="close">Annuler</button><h2>Nouveau modèle</h2><button class="btn-text bold" data-act="model-save">Enregistrer</button></div>
@@ -410,7 +521,7 @@ function openModelForm() {
 }
 function useModel(id) {
   const m = S.models.find(m => m.id === id), d = S.draft; if (!m) return;
-  d.name = d.name || m.name;
+  d.name = d.name || m.name; d.type = d.type || m.type || "";
   m.exos.forEach(me => {
     const ex = exById(me.exId); if (!ex) return;
     const last = lastOccurrence(ex.id, S.sessions);
@@ -432,7 +543,7 @@ async function saveSession() {
   })).filter(x => x.sets.length);
   if (!exos.length) { toast("Remplis ou valide au moins une série."); return; }
   const old = d.id && S.sessions.find(s => s.id === d.id);
-  const s = { id: d.id || uid(), name: d.name.trim() || "Séance", date: d.date || today(), note: d.note.trim(), exos, createdAt: old ? old.createdAt : Date.now(), updatedAt: Date.now() };
+  const s = { id: d.id || uid(), name: d.name.trim() || d.type || "Séance", type: d.type || "", date: d.date || today(), note: d.note.trim(), exos, createdAt: old ? old.createdAt : Date.now(), updatedAt: Date.now() };
   s.comments = buildComments(s);
   if (old) Object.assign(old, s); else S.sessions.push(s);
   sortSessions(); await save("sessions");
@@ -440,7 +551,7 @@ async function saveSession() {
   renderAll();
   openSheet(`<div class="sheet-head"><span></span><h2>${old ? "Séance mise à jour" : "Séance enregistrée"}</h2><button class="btn-text bold" data-act="close">OK</button></div>
     <div class="done-hero">${I.check}</div>
-    <p class="done-title">${esc(s.name)}</p>
+    <p class="done-title">${esc(s.name)}</p>${s.type && s.type !== s.name ? `<div class="center">${tag(s.type)}</div>` : ""}
     <p class="muted center" style="margin:-8px 0 0">${fmtLong(s.date)} · ${plural(s.exos.length, "exercice")}</p>
     <div class="insights"><p class="insights-title">${I.sparkle}Analyse</p><ul>${s.comments.map(c => `<li class="${c.rec ? "rec" : ""}">${esc(c.t)}</li>`).join("")}</ul></div>`);
 }
@@ -534,7 +645,7 @@ document.addEventListener("click", async e => {
     case "save-model": openModelForm(); break;
     case "model-save": {
       const name = $("m-name").value.trim(); if (!name) { toast("Donne un nom au modèle."); break; }
-      S.models.push({ id: uid(), name, exos: d.exos.map(x => ({ exId: x.exId, name: x.name, sets: x.sets.map(s => ({ rest: s.rest })) })) });
+      S.models.push({ id: uid(), name, type: d.type || "", exos: d.exos.map(x => ({ exId: x.exId, name: x.name, sets: x.sets.map(s => ({ rest: s.rest })) })) });
       await save("models"); closeSheet(); renderExos(); renderSeance(); toast("Modèle enregistré"); break;
     }
     case "use-model": useModel(id); break;
@@ -550,12 +661,12 @@ document.addEventListener("click", async e => {
     case "edit": {
       if (d.exos.length && !d.id && !await ask({ title: "Remplacer la séance en cours ?", message: "Ta séance en cours sera remplacée par celle à modifier.", actions: [{ label: "Modifier quand même", value: true }] })) break;
       const s = S.sessions.find(s => s.id === id);
-      S.draft = { id: s.id, name: s.name, date: s.date, note: s.note || "", exos: s.exos.map(x => ({ ...x, note: x.note || "", sets: x.sets.map(t => ({ ...t, done: true, ph: {} })) })) };
+      S.draft = { id: s.id, name: s.name, type: s.type || "", date: s.date, note: s.note || "", exos: s.exos.map(x => ({ ...x, note: x.note || "", sets: x.sets.map(t => ({ ...t, done: true, ph: {} })) })) };
       saveDraft(); renderSeance(); showTab("seance"); break;
     }
     case "redo": {
       if (d.exos.length && !await ask({ title: "Remplacer la séance en cours ?", message: "Les exercices déjà saisis seront remplacés.", actions: [{ label: "Remplacer", value: true }] })) break;
-      const s = S.sessions.find(s => s.id === id); S.draft = newDraft(); S.draft.name = s.name;
+      const s = S.sessions.find(s => s.id === id); S.draft = newDraft(); S.draft.name = s.name; S.draft.type = s.type || "";
       s.exos.forEach(x => { const ex = exById(x.exId) || { id: x.exId, name: x.name, mode: x.mode, band: x.band, kg: x.kg, rest: 90 }; S.draft.exos.push(draftExo(ex, x.sets)); });
       saveDraft(); renderSeance(); showTab("seance"); break;
     }
@@ -564,6 +675,16 @@ document.addEventListener("click", async e => {
       if (!await ask({ title: `Supprimer « ${s.name} » du ${fmtDate(s.date)} ?`, message: "Cette séance sera définitivement effacée.", actions: [{ label: "Supprimer la séance", destructive: true, value: true }] })) break;
       S.sessions = S.sessions.filter(s => s.id !== id); await save("sessions"); renderAll(); toast("Séance supprimée"); break;
     }
+    case "type-open": openTypeSheet(); break;
+    case "type-pick": closeSheet(); setDraftType(b.dataset.v); break;
+    case "type-add": addType(); break;
+    case "type-del": {
+      const t = b.dataset.v;
+      S.settings.types = (S.settings.types || []).filter(x => x !== t); await save("settings");
+      openTypeSheet(); toast(`Type « ${t} » retiré`); break;
+    }
+    case "hist-filter": HIST_FILTER = b.dataset.v; renderHist(); break;
+    case "chart-mode": CH_MODE[b.dataset.key] = b.dataset.m; renderProg(); break;
     case "export": exportData(); break;
     case "shortcut-help": openShortcutHelp(); break;
     case "shortcut-copy":
@@ -703,7 +824,7 @@ document.addEventListener("visibilitychange", () => { if (document.visibilitySta
 /* ---------- Export / import ---------- */
 async function exportData() {
   const ph = {}; for (const e of S.exercises) if (e.photo && photos[e.photo]) ph[e.photo] = photos[e.photo];
-  const data = { app: "coach-claude", version: 2, exportedAt: new Date().toISOString(), exercises: S.exercises, sessions: S.sessions, models: S.models, photos: ph };
+  const data = { app: "coach-claude", version: 2, exportedAt: new Date().toISOString(), exercises: S.exercises, sessions: S.sessions, models: S.models, types: S.settings.types || [], photos: ph };
   const name = `coach-claude-sauvegarde-${today()}.json`;
   const file = new File([JSON.stringify(data)], name, { type: "application/json" });
   try { if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: "Sauvegarde Coach Claude" }); return; } } catch (e) { if (e.name === "AbortError") return; }
@@ -716,6 +837,7 @@ async function importData(file) {
     const merge = (cur, inc) => { const m = new Map(cur.map(x => [x.id, x])); (inc || []).forEach(x => m.set(x.id, x)); return [...m.values()]; };
     S.exercises = merge(S.exercises, data.exercises); S.sessions = merge(S.sessions, data.sessions); S.models = merge(S.models, data.models);
     for (const [k, v] of Object.entries(data.photos || {})) { photos[k] = v; await DB.set("photo:" + k, v); }
+    if (data.types?.length) { S.settings.types = [...new Set([...(S.settings.types || []), ...data.types])]; await save("settings"); }
     sortSessions(); await Promise.all([save("exercises"), save("sessions"), save("models")]);
     renderAll(); toast(`Import terminé : ${plural((data.sessions || []).length, "séance")}`);
   } catch (e) { toast("Import impossible : " + e.message); }

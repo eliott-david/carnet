@@ -1,6 +1,6 @@
 // Mode hors ligne : sert les fichiers depuis le cache, met à jour en arrière-plan.
 // Changer VERSION à chaque mise à jour de l'appli.
-const VERSION = "coach-claude-v2";
+const VERSION = "coach-claude-v3";
 const FILES = ["./", "index.html", "app.js", "style.css", "manifest.webmanifest", "icon-180.png", "icon-192.png", "icon-512.png"];
 
 self.addEventListener("install", e => {
