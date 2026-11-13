@@ -30,6 +30,8 @@ const S = { exercises: [], sessions: [], models: [], draft: null, settings: { sh
 const save = k => DB.set(k, S[k]).catch(e => toast("Sauvegarde impossible : " + e.message));
 const photos = {}; // id -> dataURL
 const SHORTCUT = "Minuteur Coach";
+const APP_VERSION = "4";
+let pendingReload = false; // nouvelle version prête, rechargement à la fermeture de la fenêtre ouverte
 
 /* ---------- Icônes ---------- */
 const ic = (d, cls = "") => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`;
@@ -147,8 +149,8 @@ function draftExo(ex, template) {
 const saveDraft = () => save("draft");
 
 /* ---------- Composants : feuille et menu de confirmation ---------- */
-function openSheet(html) { $("modal-box").innerHTML = html; $("modal").hidden = false; $("modal-box").scrollTop = 0; }
-function closeSheet() { $("modal").hidden = true; $("modal-box").innerHTML = ""; }
+function openSheet(html) { $("modal-box").innerHTML = html; $("modal").hidden = false; $("modal-box").scrollTop = 0; syncLock(); }
+function closeSheet() { $("modal").hidden = true; $("modal-box").innerHTML = ""; syncLock(); if (pendingReload) location.reload(); }
 $("modal").addEventListener("click", e => { if (e.target === $("modal")) closeSheet(); });
 
 function ask({ title, message, actions, cancel = "Annuler" }) {
@@ -160,8 +162,8 @@ function ask({ title, message, actions, cancel = "Annuler" }) {
         ${actions.map((a, k) => `<button class="as-btn ${a.destructive ? "danger" : ""}" data-k="${k}">${esc(a.label)}</button>`).join("")}
       </div>
       <button class="as-btn as-cancel" data-k="-1">${esc(cancel)}</button></div>`;
-    d.hidden = false;
-    const done = v => { d.hidden = true; d.innerHTML = ""; d.onclick = null; res(v); };
+    d.hidden = false; syncLock();
+    const done = v => { d.hidden = true; d.innerHTML = ""; d.onclick = null; syncLock(); res(v); };
     d.onclick = e => {
       const b = e.target.closest("[data-k]");
       if (b) { const k = +b.dataset.k; done(k < 0 ? null : actions[k].value); }
@@ -299,10 +301,11 @@ function renderProg() {
 /* ---------- Courbes ---------- */
 const CH_MODE = {};   // vue choisie par exercice
 const CH_DATA = {};   // points tracés, pour l'affichage au toucher
-function niceTicks(lo, hi) {
+function niceTicks(lo, hi, integer) {
   if (hi === lo) { hi = hi + Math.max(1, Math.abs(hi) * .2); lo = Math.max(0, lo - Math.max(1, Math.abs(lo) * .2)); }
   const raw = (hi - lo) / 3, p = Math.pow(10, Math.floor(Math.log10(raw))), f = raw / p;
-  const step = (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p;
+  let step = (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p;
+  if (integer) step = Math.max(1, Math.round(step));
   const start = Math.floor(lo / step) * step, end = Math.ceil(hi / step) * step, out = [];
   for (let v = start; v <= end + step / 2; v += step) out.push(+v.toFixed(6));
   return out;
@@ -315,7 +318,7 @@ function chart(key, pts, ex, mode, rec) {
     if (mode === "kg") { const k = Math.max(0, ...p.ex.sets.filter(s => val(s, p.ex) > 0).map(s => num(s.kg))); return { date: p.date, v: k, label: k ? `${k} kg` : "Sans charge" }; }
     return { date: p.date, v: val(p.best, p.ex), label: fmtSet(p.best, p.ex) };
   });
-  const vals = series.map(s => s.v), ticks = niceTicks(Math.min(...vals), Math.max(...vals));
+  const vals = series.map(s => s.v), ticks = niceTicks(Math.min(...vals), Math.max(...vals), mode !== "kg");
   const lo = ticks[0], hi = ticks[ticks.length - 1];
   const W = 320, H = 168, L = 6, R = 34, T = 40, B = 24, n = series.length;
   const xs = series.map((_, i) => L + 6 + i * (W - L - R - 12) / (n - 1));
@@ -396,7 +399,8 @@ function renderExos() {
       <label class="row row-btn" for="import-file"><span class="row-title accent">Importer une sauvegarde</span></label>
     </div>
     <input type="file" id="import-file" accept="application/json,.json" hidden>
-    <p class="footnote">Tes données restent sur ce téléphone. Exporte régulièrement une sauvegarde dans Fichiers ou iCloud Drive.</p>`;
+    <p class="footnote">Tes données restent sur ce téléphone. Exporte régulièrement une sauvegarde dans Fichiers ou iCloud Drive.</p>
+    <p class="footnote center version">Coach Claude · version ${APP_VERSION}</p>`;
 }
 
 /* ---------- Fiche exercice ---------- */
@@ -535,9 +539,11 @@ async function saveSession() {
   const d = S.draft;
   const exos = d.exos.map(x => ({
     exId: x.exId, name: x.name, mode: x.mode, band: x.band, kg: x.kg, note: (x.note || "").trim(),
+    // Une série compte dès qu'elle est validée ou qu'une valeur y est saisie.
+    // Les valeurs affichées en gris (charge, élastique reprises de la série d'avant) sont alors enregistrées telles quelles.
     sets: x.sets.filter(s => s.done || s.reps !== "" || s.sec !== "" || s.kg !== "").map(s => ({
       reps: s.reps || (s.done ? s.ph?.reps : "") || "", sec: s.sec || (s.done ? s.ph?.sec : "") || "",
-      kg: s.kg || (s.done ? s.ph?.kg : "") || "", band: s.band || (s.done ? s.ph?.band : "") || "",
+      kg: x.kg ? (s.kg || s.ph?.kg || "") : (s.kg || ""), band: x.band ? (s.band || s.ph?.band || "") : (s.band || ""),
       rest: s.rest, rpe: s.rpe, note: (s.note || "").trim(),
     })),
   })).filter(x => x.sets.length);
@@ -548,6 +554,7 @@ async function saveSession() {
   if (old) Object.assign(old, s); else S.sessions.push(s);
   sortSessions(); await save("sessions");
   S.draft = newDraft(); saveDraft(); releaseWake();
+  if (T.mode === "hold") stopTimer();
   renderAll();
   openSheet(`<div class="sheet-head"><span></span><h2>${old ? "Séance mise à jour" : "Séance enregistrée"}</h2><button class="btn-text bold" data-act="close">OK</button></div>
     <div class="done-hero">${I.check}</div>
@@ -611,7 +618,7 @@ document.addEventListener("click", async e => {
       const filled = s.reps || s.sec || s.kg;
       const ok = await ask({ title: `Supprimer la série ${j + 1} ?`, message: `${x.name}${filled ? " · " + fmtSet(s, x) : ""}`, actions: [{ label: "Supprimer la série", destructive: true, value: true }] });
       if (!ok) break;
-      x.sets.splice(j, 1); saveDraft(); renderSeance(); toast("Série supprimée"); break;
+      if (T.mode === "hold") stopTimer(); x.sets.splice(j, 1); saveDraft(); renderSeance(); toast("Série supprimée"); break;
     }
     case "done": {
       const x = d.exos[i], s = x.sets[j]; s.done = !s.done;
@@ -631,6 +638,7 @@ document.addEventListener("click", async e => {
       if (exById(x.exId)) acts.push({ label: "Modifier la fiche", value: "edit" });
       acts.push({ label: "Retirer de la séance", destructive: true, value: "del" });
       const r = await ask({ title: x.name, actions: acts });
+      if (r && r !== "edit" && T.mode === "hold") stopTimer();
       if (r === "up" || r === "down") { const k = r === "up" ? i - 1 : i + 1; [d.exos[k], d.exos[i]] = [d.exos[i], d.exos[k]]; saveDraft(); renderSeance(); }
       else if (r === "edit") openExForm(exById(x.exId));
       else if (r === "del") { d.exos.splice(i, 1); saveDraft(); renderSeance(); toast("Exercice retiré"); }
@@ -639,9 +647,9 @@ document.addEventListener("click", async e => {
     case "save": saveSession(); break;
     case "clear": {
       if (!await ask({ title: "Vider la séance en cours ?", message: "Les exercices et séries saisis seront perdus.", actions: [{ label: "Vider la séance", destructive: true, value: true }] })) break;
-      S.draft = newDraft(); saveDraft(); renderSeance(); break;
+      if (T.mode === "hold") stopTimer(); S.draft = newDraft(); saveDraft(); renderSeance(); break;
     }
-    case "cancel-edit": S.draft = newDraft(); saveDraft(); renderSeance(); break;
+    case "cancel-edit": if (T.mode === "hold") stopTimer(); S.draft = newDraft(); saveDraft(); renderSeance(); break;
     case "save-model": openModelForm(); break;
     case "model-save": {
       const name = $("m-name").value.trim(); if (!name) { toast("Donne un nom au modèle."); break; }
@@ -661,12 +669,13 @@ document.addEventListener("click", async e => {
     case "edit": {
       if (d.exos.length && !d.id && !await ask({ title: "Remplacer la séance en cours ?", message: "Ta séance en cours sera remplacée par celle à modifier.", actions: [{ label: "Modifier quand même", value: true }] })) break;
       const s = S.sessions.find(s => s.id === id);
+      if (T.mode === "hold") stopTimer();
       S.draft = { id: s.id, name: s.name, type: s.type || "", date: s.date, note: s.note || "", exos: s.exos.map(x => ({ ...x, note: x.note || "", sets: x.sets.map(t => ({ ...t, done: true, ph: {} })) })) };
       saveDraft(); renderSeance(); showTab("seance"); break;
     }
     case "redo": {
       if (d.exos.length && !await ask({ title: "Remplacer la séance en cours ?", message: "Les exercices déjà saisis seront remplacés.", actions: [{ label: "Remplacer", value: true }] })) break;
-      const s = S.sessions.find(s => s.id === id); S.draft = newDraft(); S.draft.name = s.name; S.draft.type = s.type || "";
+      const s = S.sessions.find(s => s.id === id); if (T.mode === "hold") stopTimer(); S.draft = newDraft(); S.draft.name = s.name; S.draft.type = s.type || "";
       s.exos.forEach(x => { const ex = exById(x.exId) || { id: x.exId, name: x.name, mode: x.mode, band: x.band, kg: x.kg, rest: 90 }; S.draft.exos.push(draftExo(ex, x.sets)); });
       saveDraft(); renderSeance(); showTab("seance"); break;
     }
@@ -715,6 +724,37 @@ function showTab(t) {
 }
 function onScroll() { $("navbar").classList.toggle("scrolled", window.scrollY > 40); }
 window.addEventListener("scroll", onScroll, { passive: true });
+
+/* Bug iOS (appli ajoutée à l'écran d'accueil) : la zone utilisée pour placer les éléments fixes
+   est parfois plus courte que l'écran, ce qui laisse un espace vide sous la barre d'onglets.
+   On mesure l'écart et on redescend les éléments fixes d'autant. */
+const STANDALONE = window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+function fixViewport() {
+  if (!STANDALONE) return;
+  const vv = window.visualViewport, ch = document.documentElement.clientHeight;
+  const real = Math.max(window.innerHeight, vv ? vv.height + vv.offsetTop : 0);
+  const gap = Math.round(real - ch);
+  document.documentElement.style.setProperty("--gap", (gap > 0 && gap < 140 ? gap : 0) + "px");
+}
+window.addEventListener("resize", fixViewport);
+window.visualViewport?.addEventListener("resize", fixViewport);
+window.addEventListener("orientationchange", () => setTimeout(fixViewport, 300));
+window.addEventListener("pageshow", fixViewport);
+
+/* Fenêtres ouvertes : la page de derrière ne doit pas défiler */
+let touchY = 0;
+document.addEventListener("touchstart", e => { touchY = e.touches[0].clientY; }, { passive: true });
+document.addEventListener("touchmove", e => {
+  const sheetOpen = !$("modal").hidden, dialogOpen = !$("dialog").hidden;
+  if (!sheetOpen && !dialogOpen) return;
+  if (!e.cancelable) return;
+  const sc = e.target.closest(".sheet");
+  if (dialogOpen || !sc) { e.preventDefault(); return; }
+  const dy = e.touches[0].clientY - touchY;
+  const atTop = sc.scrollTop <= 0, atBottom = sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 1;
+  if (sc.scrollHeight <= sc.clientHeight + 1 || (dy > 0 && atTop) || (dy < 0 && atBottom)) e.preventDefault();
+}, { passive: false });
+function syncLock() { document.documentElement.classList.toggle("locked", !$("modal").hidden || !$("dialog").hidden); }
 function renderAll() { renderSeance(); renderHist(); renderProg(); renderExos(); }
 
 /* ---------- Minuteur ---------- */
@@ -853,13 +893,19 @@ async function importData(file) {
   } catch (e) { toast("Stockage indisponible : les données ne seront pas gardées."); }
   if (!S.draft) S.draft = newDraft();
   sortSessions(); renderAll(); showTab("seance"); drawTimer();
+  fixViewport(); setTimeout(fixViewport, 400);
 })();
 
+/* Mises à jour : dès qu'une nouvelle version est installée, l'appli se recharge toute seule
+   (la séance en cours est déjà enregistrée sur le téléphone). */
+function reloadWhenIdle() {
+  if (!$("modal").hidden || !$("dialog").hidden) { pendingReload = true; return; }
+  location.reload();
+}
 if ("serviceWorker" in navigator) {
+  const hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener("controllerchange", () => { if (hadController) reloadWhenIdle(); });
   navigator.serviceWorker.register("sw.js").then(reg => {
-    reg.addEventListener("updatefound", () => {
-      const w = reg.installing;
-      w && w.addEventListener("statechange", () => { if (w.state === "activated" && navigator.serviceWorker.controller) toast("Nouvelle version installée. Relance l'appli pour en profiter."); });
-    });
+    document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") reg.update().catch(() => {}); });
   }).catch(() => {});
 }
