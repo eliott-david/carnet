@@ -30,7 +30,7 @@ const S = { exercises: [], sessions: [], models: [], draft: null, settings: { sh
 const save = k => DB.set(k, S[k]).catch(e => toast("Sauvegarde impossible : " + e.message));
 const photos = {}; // id -> dataURL
 const SHORTCUT = "Minuteur Coach";
-const APP_VERSION = "2.0.4";
+const APP_VERSION = "2.0.5";
 let pendingReload = false; // nouvelle version prête, rechargement à la fermeture de la fenêtre ouverte
 
 /* ---------- Icônes ---------- */
@@ -43,6 +43,7 @@ const I = {
   x: ic('<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>'),
   timer: ic('<circle cx="12" cy="13.5" r="7.5"/><path d="M12 13.5V10M9.5 3h5M18.5 6.5l1.2-1.2"/>'),
   chev: ic('<path d="M9.5 5.5L16 12l-6.5 6.5"/>', "chev"),
+  pause: ic('<rect x="6.5" y="5.5" width="4" height="13" rx="1.2"/><rect x="13.5" y="5.5" width="4" height="13" rx="1.2"/>', "fill"),
   play: ic('<path d="M8 5.8v12.4a.8.8 0 0 0 1.2.7l10-6.2a.8.8 0 0 0 0-1.4l-10-6.2A.8.8 0 0 0 8 5.8z"/>', "fill"),
   search: ic('<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/>'),
   chevDown: ic('<path d="M6 9.5l6 6 6-6"/>', "chev-down"),
@@ -397,9 +398,10 @@ function renderExos() {
     <h2 class="sh">Minuteur sur l'écran verrouillé</h2>
     <div class="group">
       <label class="row"><span class="row-main"><span class="row-title">Utiliser le minuteur de l'iPhone</span><span class="row-sub">Via le raccourci « ${SHORTCUT} »</span></span><input type="checkbox" class="switch" id="set-shortcut" ${S.settings.shortcut ? "checked" : ""}></label>
-      <button class="row row-btn" data-act="shortcut-help"><span class="row-title">Configurer le raccourci</span>${I.chev}</button>
+      ${S.settings.shortcut ? `<label class="row"><span class="row-main"><span class="row-title">Pause et arrêt aussi sur l'iPhone</span><span class="row-sub">Via « ${SC.pause} », « ${SC.resume} » et « ${SC.stop} »</span></span><input type="checkbox" class="switch" id="set-sync" ${S.settings.shortcutSync ? "checked" : ""}></label>` : ""}
+      <button class="row row-btn" data-act="shortcut-help"><span class="row-title">Configurer les raccourcis</span>${I.chev}</button>
     </div>
-    <p class="footnote">Le décompte s'affiche sur l'écran verrouillé et dans la Dynamic Island, et la sonnerie fonctionne même téléphone verrouillé. L'app Raccourcis s'ouvre une seconde à chaque récup.</p>
+    <p class="footnote">Le décompte s'affiche sur l'écran verrouillé et dans la Dynamic Island, et la sonnerie fonctionne même téléphone verrouillé. L'app Raccourcis s'ouvre une seconde à chaque commande.</p>
 
     <h2 class="sh">Sauvegarde</h2>
     <div class="group">
@@ -589,8 +591,9 @@ document.addEventListener("change", async e => {
     try { exForm.newPhoto = await resizePhoto(t.files[0]); drawExForm(); } catch (err) { toast("Photo illisible, essaie une autre image."); }
   }
   if (t.id === "import-file" && t.files[0]) importData(t.files[0]);
+  if (t.id === "set-sync") { S.settings.shortcutSync = t.checked; save("settings"); }
   if (t.id === "set-shortcut") {
-    S.settings.shortcut = t.checked; save("settings");
+    S.settings.shortcut = t.checked; save("settings"); renderExos();
     if (t.checked && !S.settings.shortcutSeen) { S.settings.shortcutSeen = true; save("settings"); openShortcutHelp(); }
   }
 });
@@ -715,18 +718,20 @@ document.addEventListener("click", async e => {
     case "chart-mode": CH_MODE[b.dataset.key] = b.dataset.m; renderProg(); break;
     case "export": exportData(); break;
     case "shortcut-help": openShortcutHelp(); break;
-    case "shortcut-copy":
-      try { await navigator.clipboard.writeText(SHORTCUT); toast("Nom copié"); } catch (err) { toast(SHORTCUT); }
+    case "shortcut-copy": {
+      const n = b.dataset.name || SHORTCUT;
+      try { await navigator.clipboard.writeText(n); toast(`« ${n} » copié`); } catch (err) { toast(n); }
       break;
+    }
     case "shortcut-test": launchShortcut(10); break;
 
     case "timer-open": openTimerSheet(); break;
-    case "mini-btn": if (T.mode === "hold") finishHold(); else stopTimer(); break;
-    case "t-main":
-      if (T.mode === "rest") stopTimer();
-      else if (T.mode === "hold") finishHold();
-      else startRest(T.pick);
-      break;
+    case "mini-btn": if (T.mode === "hold") finishHold(); else stopTimer(true); break;
+    case "mini-pp": if (T.mode === "rest") pauseRest(); else resumeRest(); break;
+    case "t-main": if (T.mode === "hold") finishHold(); else startRest(T.pick); break;
+    case "t-stop": stopTimer(true); break;
+    case "t-pause": pauseRest(); break;
+    case "t-resume": resumeRest(); break;
     case "t-adj": adjustRest(+b.dataset.s); break;
     case "t-preset": T.pick = +b.dataset.s; startRest(T.pick); break;
   }
@@ -761,7 +766,7 @@ function syncLock() { document.documentElement.classList.toggle("locked", !$("mo
 function renderAll() { renderSeance(); renderHist(); renderProg(); renderExos(); }
 
 /* ---------- Minuteur ---------- */
-const T = { mode: "idle", end: 0, start: 0, dur: 0, pick: 90, label: "Récup", hold: null, iv: null, doneT: null, shown: "" };
+const T = { mode: "idle", end: 0, start: 0, dur: 0, left: 0, pick: 90, label: "Récup", hold: null, iv: null, doneT: null, shown: "", btns: "" };
 const PRESETS = [30, 60, 90, 120, 180];
 const MINI_C = 2 * Math.PI * 14, BIG_C = 2 * Math.PI * 100;
 const fmtPreset = s => s < 60 ? s + " s" : s % 60 ? fmtTime(s) : s / 60 + " min";
@@ -771,21 +776,44 @@ function beep() {
   try { [0, .28, .56].forEach(t => { const o = audio.createOscillator(), g = audio.createGain(); o.frequency.value = 880; g.gain.value = .25; o.connect(g); g.connect(audio.destination); o.start(audio.currentTime + t); o.stop(audio.currentTime + t + .15); }); } catch (e) {}
   try { navigator.vibrate && navigator.vibrate([200, 100, 200]); } catch (e) {}
 }
-function launchShortcut(sec) {
-  location.href = `shortcuts://run-shortcut?name=${encodeURIComponent(SHORTCUT)}&input=text&text=${Math.round(sec)}`;
+
+/* Minuteur de l'iPhone : un raccourci par commande (lancer, pause, reprise, arrêt) */
+const SC = { start: SHORTCUT, pause: `${SHORTCUT} Pause`, resume: `${SHORTCUT} Reprise`, stop: `${SHORTCUT} Stop` };
+function runShortcut(name, text) {
+  location.href = `shortcuts://run-shortcut?name=${encodeURIComponent(name)}` + (text != null ? `&input=text&text=${encodeURIComponent(text)}` : "");
 }
+const iphoneSync = () => !!(S.settings.shortcut && S.settings.shortcutSync);
+function launchShortcut(sec) { runShortcut(SC.start, Math.round(sec)); }
+
 function startRest(sec, name) {
   T.mode = "rest"; T.dur = sec; T.end = Date.now() + sec * 1000; T.label = name ? `Récup · ${name}` : "Récup"; T.hold = null;
   clearTimeout(T.doneT); run();
   if (S.settings.shortcut) launchShortcut(sec);
 }
-function adjustRest(delta) {
+function pauseRest() {
   if (T.mode !== "rest") return;
-  T.end += delta * 1000; T.dur = Math.max(1, T.dur + delta); drawTimer();
+  T.left = Math.max(0, T.end - Date.now()); T.mode = "paused"; clearInterval(T.iv); drawTimer();
+  if (iphoneSync()) runShortcut(SC.pause);
+}
+function resumeRest() {
+  if (T.mode !== "paused") return;
+  T.end = Date.now() + T.left; T.mode = "rest"; run();
+  if (iphoneSync()) runShortcut(SC.resume);
+}
+function adjustRest(delta) {
+  if (T.mode === "rest") T.end += delta * 1000;
+  else if (T.mode === "paused") T.left = Math.max(1000, T.left + delta * 1000);
+  else return;
+  T.dur = Math.max(1, T.dur + delta); drawTimer();
 }
 function startHold(i, j) { T.mode = "hold"; T.start = Date.now(); T.hold = { i, j }; T.label = `Série ${j + 1} · ${S.draft.exos[i].name}`; clearTimeout(T.doneT); run(); }
 function run() { clearInterval(T.iv); T.iv = setInterval(drawTimer, 250); drawTimer(); }
-function stopTimer() { clearInterval(T.iv); clearTimeout(T.doneT); T.mode = "idle"; T.hold = null; T.label = "Récup"; drawTimer(); }
+/* fromUser : arrêt demandé par l'utilisateur, à répercuter sur le minuteur de l'iPhone */
+function stopTimer(fromUser) {
+  const wasRunning = T.mode === "rest" || T.mode === "paused";
+  clearInterval(T.iv); clearTimeout(T.doneT); T.mode = "idle"; T.hold = null; T.label = "Récup"; drawTimer();
+  if (fromUser === true && wasRunning && iphoneSync()) runShortcut(SC.stop);
+}
 function finishRest() {
   clearInterval(T.iv); const late = Date.now() - T.end; T.mode = "done";
   if (late < 3000) beep();
@@ -798,64 +826,89 @@ function finishHold() {
   if (s) { s.sec = String(sec); s.done = true; for (const k of ["kg", "band"]) if (!s[k] && s.ph?.[k]) s[k] = s.ph[k]; saveDraft(); renderSeance(); }
   startRest(num(s?.rest) || 90, x?.name);
 }
+function timerButtons() {
+  switch (T.mode) {
+    case "rest": return `<button class="round stop" data-act="t-stop">Arrêter</button><button class="round pause" data-act="t-pause">Pause</button>`;
+    case "paused": return `<button class="round stop" data-act="t-stop">Arrêter</button><button class="round go" data-act="t-resume">Reprendre</button>`;
+    case "hold": return `<button class="round stop" data-act="t-stop">Annuler</button><button class="round go" data-act="t-main">Terminer</button>`;
+    default: return `<button class="round go" data-act="t-main">Démarrer</button>`;
+  }
+}
 function drawTimer() {
   const now = Date.now(); let secs, p;
   if (T.mode === "rest") {
     const left = Math.ceil((T.end - now) / 1000);
     if (left <= 0) { finishRest(); return; }
     secs = left; p = Math.max(0, Math.min(1, (T.end - now) / (T.dur * 1000)));
-  } else if (T.mode === "hold") { secs = Math.floor((now - T.start) / 1000); p = (secs % 60) / 60; }
+  } else if (T.mode === "paused") { secs = Math.ceil(T.left / 1000); p = Math.max(0, Math.min(1, T.left / (T.dur * 1000))); }
+  else if (T.mode === "hold") { secs = Math.floor((now - T.start) / 1000); p = (secs % 60) / 60; }
   else if (T.mode === "done") { secs = 0; p = 1; }
   else { secs = T.pick; p = 1; }
-  const txt = fmtTime(secs);
+  const txt = fmtTime(secs), paused = T.mode === "paused";
   const mini = $("mini");
   mini.hidden = T.mode === "idle";
   mini.classList.toggle("done", T.mode === "done");
+  mini.classList.toggle("paused", paused);
   $("mini-time").textContent = txt;
-  $("mini-label").textContent = T.mode === "done" ? "Récup terminée, c'est reparti" : T.label;
+  $("mini-label").textContent = T.mode === "done" ? "Récup terminée, c'est reparti" : paused ? `En pause · ${T.label}` : T.label;
   $("mini-ring").style.strokeDashoffset = (MINI_C * (1 - p)).toFixed(2);
   if (T.shown !== T.mode) {
     T.shown = T.mode;
     $("mini-btn").innerHTML = T.mode === "hold" ? I.check : I.x;
     $("mini-btn").setAttribute("aria-label", T.mode === "hold" ? "Terminer la série" : "Arrêter le minuteur");
+    $("mini-pp").hidden = !(T.mode === "rest" || paused);
+    $("mini-pp").innerHTML = paused ? I.play : I.pause;
+    $("mini-pp").setAttribute("aria-label", paused ? "Reprendre le minuteur" : "Mettre le minuteur en pause");
   }
   if ($("t-clock")) {
     $("t-clock").textContent = txt;
-    $("t-label").textContent = T.mode === "done" ? "C'est reparti" : T.mode === "idle" ? "Choisis une durée" : T.label;
+    $("t-label").textContent = T.mode === "done" ? "C'est reparti" : T.mode === "idle" ? "Choisis une durée" : paused ? `En pause · ${T.label}` : T.label;
     $("t-ring").style.strokeDashoffset = (BIG_C * (1 - p)).toFixed(2);
     $("t-big").classList.toggle("done", T.mode === "done");
-    const main = $("t-main");
-    main.textContent = T.mode === "rest" ? "Arrêter" : T.mode === "hold" ? "Terminer" : "Démarrer";
-    main.className = "round " + (T.mode === "rest" ? "stop" : "go");
-    $("t-minus").disabled = $("t-plus").disabled = T.mode !== "rest";
+    $("t-big").classList.toggle("paused", paused);
+    if (T.btns !== T.mode) {
+      T.btns = T.mode;
+      $("t-btns").innerHTML = timerButtons();
+      $("t-btns").classList.toggle("single", !["rest", "paused", "hold"].includes(T.mode));
+    }
+    $("t-minus").disabled = $("t-plus").disabled = !(T.mode === "rest" || paused);
     document.querySelectorAll(".presets .chip").forEach(c => c.classList.toggle("on", +c.dataset.s === T.pick));
   }
 }
 function openTimerSheet() {
+  T.btns = "";
+  const note = !S.settings.shortcut ? "Pour voir le décompte sur l'écran verrouillé, active le minuteur de l'iPhone dans l'onglet Exercices."
+    : iphoneSync() ? "Le minuteur de l'iPhone suit le lancement, la pause, la reprise et l'arrêt. Les boutons ±15 s ne le modifient pas."
+    : `Le minuteur de l'iPhone se lance aussi, via le raccourci « ${SHORTCUT} ». Pour qu'il suive aussi la pause et l'arrêt, active l'option dans l'onglet Exercices.`;
   openSheet(`<div class="sheet-head"><span></span><h2>Minuteur</h2><button class="btn-text bold" data-act="close">OK</button></div>
     <div class="tbig" id="t-big"><svg viewBox="0 0 220 220" aria-hidden="true"><circle class="ring-track" cx="110" cy="110" r="100"/><circle class="ring-prog" id="t-ring" cx="110" cy="110" r="100" stroke-dasharray="${BIG_C.toFixed(2)}"/></svg>
       <div class="tbig-in"><div class="tclock" id="t-clock" role="timer">0:00</div><div class="tlabel" id="t-label"></div></div></div>
-    <div class="tbtns"><button class="round" id="t-minus" data-act="t-adj" data-s="-15">−15 s</button><button class="round go" id="t-main" data-act="t-main">Démarrer</button><button class="round" id="t-plus" data-act="t-adj" data-s="15">+15 s</button></div>
+    <div class="tbtns" id="t-btns"></div>
+    <div class="adj"><button class="adj-btn" id="t-minus" data-act="t-adj" data-s="-15">−15 s</button><button class="adj-btn" id="t-plus" data-act="t-adj" data-s="15">+15 s</button></div>
     <h2 class="sh">Durée de récup</h2>
     <div class="presets">${PRESETS.map(s => `<button class="chip" data-act="t-preset" data-s="${s}">${fmtPreset(s)}</button>`).join("")}</div>
-    <p class="footnote" style="margin-top:4px">${S.settings.shortcut ? `Le minuteur de l'iPhone se lance aussi, via le raccourci « ${SHORTCUT} ». Les boutons ±15 s ne le modifient pas.` : "Pour voir le décompte sur l'écran verrouillé, active le minuteur de l'iPhone dans l'onglet Exercices."}</p>`);
+    <p class="footnote" style="margin-top:4px">${note}</p>`);
   drawTimer();
 }
 function openShortcutHelp() {
+  const copy = n => `<button class="row row-btn" data-act="shortcut-copy" data-name="${esc(n)}"><span class="row-title">${esc(n)}</span><span class="accent">Copier</span></button>`;
   openSheet(`<div class="sheet-head"><span></span><h2>Minuteur de l'iPhone</h2><button class="btn-text bold" data-act="close">OK</button></div>
-    <p class="lead">Le minuteur de l'iPhone affiche le décompte sur l'écran verrouillé et dans la Dynamic Island, et sonne même téléphone verrouillé. Coach Claude le lance grâce à un raccourci, à créer une seule fois.</p>
+    <p class="lead">Le minuteur de l'iPhone affiche le décompte sur l'écran verrouillé et dans la Dynamic Island, et sonne même téléphone verrouillé. Coach Claude le commande grâce à des raccourcis, à créer une seule fois dans l'app <b>Raccourcis</b> (bouton <b>+</b>).</p>
+    <h2 class="sh">1. Lancer le minuteur</h2>
     <ol class="group steps">
-      <li class="row"><span class="step">1</span><span>Ouvre l'app <b>Raccourcis</b> et appuie sur <b>+</b> pour créer un raccourci.</span></li>
-      <li class="row"><span class="step">2</span><span>Ajoute l'action <b>Démarrer le minuteur</b> (app Horloge).</span></li>
-      <li class="row"><span class="step">3</span><span>Touche la durée, choisis la variable <b>Entrée du raccourci</b>, puis l'unité <b>secondes</b>.</span></li>
-      <li class="row"><span class="step">4</span><span>Nomme le raccourci exactement <b>${SHORTCUT}</b>.</span></li>
-      <li class="row"><span class="step">5</span><span>Active l'option dans Coach Claude, puis fais un essai.</span></li>
+      <li class="row"><span class="step">1</span><span>Ajoute l'action <b>Démarrer le minuteur</b> (app Horloge).</span></li>
+      <li class="row"><span class="step">2</span><span>Touche la durée, choisis la variable <b>Entrée du raccourci</b>, puis l'unité <b>secondes</b>.</span></li>
+      <li class="row"><span class="step">3</span><span>Nomme le raccourci exactement <b>${SC.start}</b>.</span></li>
     </ol>
-    <div class="group">
-      <button class="row row-btn" data-act="shortcut-copy"><span class="row-title accent">Copier le nom « ${SHORTCUT} »</span></button>
-      <button class="row row-btn" data-act="shortcut-test"><span class="row-title accent">Tester avec 10 secondes</span></button>
-    </div>
-    <p class="footnote">À chaque récup, l'app Raccourcis s'ouvre une seconde pour lancer le minuteur, puis tu reviens dans Coach Claude. Le minuteur de l'appli continue en parallèle.</p>`);
+    <h2 class="sh">2. Pause, reprise et arrêt (facultatif)</h2>
+    <ol class="group steps">
+      <li class="row"><span class="step">1</span><span>Crée trois autres raccourcis, avec une seule action chacun. Dans les actions, cherche « minuteur » : celle qui <b>met en pause</b>, celle qui <b>reprend</b> et celle qui <b>annule</b> le minuteur.</span></li>
+      <li class="row"><span class="step">2</span><span>Nomme-les exactement comme ci-dessous, dans le même ordre.</span></li>
+      <li class="row"><span class="step">3</span><span>Active « Pause et arrêt aussi sur l'iPhone » dans l'onglet Exercices.</span></li>
+    </ol>
+    <div class="group">${copy(SC.start)}${copy(SC.pause)}${copy(SC.resume)}${copy(SC.stop)}</div>
+    <div class="group"><button class="row row-btn" data-act="shortcut-test"><span class="row-title accent">Tester le lancement avec 10 secondes</span></button></div>
+    <p class="footnote">À chaque commande, l'app Raccourcis s'ouvre une seconde, puis tu reviens dans Coach Claude. Le minuteur de l'appli continue en parallèle.</p>`);
 }
 
 /* ---------- Écran allumé pendant la séance ---------- */
