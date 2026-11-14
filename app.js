@@ -30,7 +30,7 @@ const S = { exercises: [], sessions: [], models: [], draft: null, settings: { sh
 const save = k => DB.set(k, S[k]).catch(e => toast("Sauvegarde impossible : " + e.message));
 const photos = {}; // id -> dataURL
 const SHORTCUT = "Minuteur Coach";
-const APP_VERSION = "2.1.0";
+const APP_VERSION = "2.1.1";
 let pendingReload = false; // nouvelle version prête, rechargement à la fermeture de la fenêtre ouverte
 
 /* ---------- Icônes ---------- */
@@ -151,8 +151,9 @@ function draftExo(ex, template) {
 const saveDraft = () => save("draft");
 
 /* ---------- Composants : feuille et menu de confirmation ---------- */
-function openSheet(html) { $("modal-box").innerHTML = html; $("modal").hidden = false; $("modal-box").scrollTop = 0; syncLock(); }
-function closeSheet() { $("modal").hidden = true; $("modal-box").innerHTML = ""; syncLock(); if (pendingReload) location.reload(); }
+function resetSheetDrag() { const b = $("modal-box"), w = $("modal"); b.style.transform = b.style.transition = ""; w.style.backgroundColor = w.style.transition = ""; }
+function openSheet(html) { resetSheetDrag(); $("modal-box").innerHTML = html; $("modal").hidden = false; $("modal-box").scrollTop = 0; syncLock(); }
+function closeSheet() { $("modal").hidden = true; $("modal-box").innerHTML = ""; resetSheetDrag(); syncLock(); if (pendingReload) location.reload(); }
 $("modal").addEventListener("click", e => { if (e.target === $("modal")) closeSheet(); });
 
 function ask({ title, message, actions, cancel = "Annuler" }) {
@@ -748,6 +749,50 @@ function showTab(t) {
 }
 function onScroll() { $("navbar").classList.toggle("scrolled", window.scrollY > 40); }
 window.addEventListener("scroll", onScroll, { passive: true });
+
+/* Glisser une fenêtre vers le bas pour la fermer (comme sur iOS).
+   Le geste ne démarre que si la fenêtre est déjà tout en haut, ou depuis sa barre de titre. */
+const SD = { armed: false, on: false, y0: 0, d: 0, samples: [] };
+document.addEventListener("touchstart", e => {
+  SD.armed = SD.on = false;
+  if ($("modal").hidden || !$("dialog").hidden) return;
+  const box = $("modal-box");
+  if (!e.target.closest(".sheet")) return;
+  SD.armed = box.scrollTop <= 0 || !!e.target.closest(".sheet-head");
+  SD.y0 = e.touches[0].clientY; SD.d = 0; SD.samples = [[performance.now(), SD.y0]];
+}, { passive: true });
+document.addEventListener("touchmove", e => {
+  if (!SD.armed) return;
+  const box = $("modal-box"), y = e.touches[0].clientY;
+  if (!SD.on) {
+    const dy = y - SD.y0;
+    if (dy < -4) { SD.armed = false; return; }           // l'utilisateur fait défiler le contenu
+    if (dy > 4 && box.scrollTop <= 0) { SD.on = true; SD.y0 = y; box.style.transition = "none"; $("modal").style.transition = "none"; }
+    else return;
+  }
+  SD.d = Math.max(0, y - SD.y0);
+  SD.samples.push([performance.now(), y]); if (SD.samples.length > 6) SD.samples.shift();
+  box.style.transform = `translateY(${SD.d}px)`;
+  $("modal").style.backgroundColor = `rgba(0,0,0,${(.35 * Math.max(0, 1 - SD.d / box.offsetHeight)).toFixed(3)})`;
+}, { passive: true });
+function endSheetDrag() {
+  if (!SD.on) { SD.armed = false; return; }
+  SD.on = SD.armed = false;
+  const box = $("modal-box"), w = $("modal");
+  const [a, b] = [SD.samples[0], SD.samples[SD.samples.length - 1]];
+  const v = b && a && b[0] > a[0] ? (b[1] - a[1]) / (b[0] - a[0]) : 0;   // px/ms, positif vers le bas
+  const close = SD.d > Math.min(160, box.offsetHeight * .3) || (v > .5 && SD.d > 30);
+  box.style.transition = `transform ${close ? .22 : .3}s cubic-bezier(.2,.9,.3,1)`; w.style.transition = "background-color .22s";
+  if (close) {
+    box.style.transform = "translateY(100%)"; w.style.backgroundColor = "rgba(0,0,0,0)";
+    setTimeout(() => { if (!$("modal").hidden) closeSheet(); }, 220);
+  } else {
+    box.style.transform = "translateY(0)"; w.style.backgroundColor = "";
+    setTimeout(() => { if (!SD.on) { box.style.transition = ""; w.style.transition = ""; } }, 320);
+  }
+}
+document.addEventListener("touchend", endSheetDrag, { passive: true });
+document.addEventListener("touchcancel", endSheetDrag, { passive: true });
 
 /* Fenêtres ouvertes : la page de derrière ne doit pas défiler */
 let touchY = 0;
